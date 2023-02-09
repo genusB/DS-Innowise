@@ -1,4 +1,5 @@
 import pandas as pd
+from sklearn.preprocessing import LabelEncoder
 import os
 
 
@@ -37,7 +38,15 @@ class ETL:
         self.test.loc[self.test.shop_id == 10, 'shop_id'] = 11
 
         self.shops.shop_name = self.shops.shop_name.map(lambda x: x.lstrip('!'))
-        self.shops[['city', 'shop_name']] = self.shops['shop_name'].str.split(' ', n=1, expand=True)
+
+        self.shops['city'] = self.shops.shop_name.str.split(' ').map(lambda x: x[0])
+        self.shops['category'] = self.shops.shop_name.str.split(' ').map(lambda x: x[1])
+
+        shop_enc = LabelEncoder()
+        self.shops['shop_category'] = shop_enc.fit_transform(self.shops['category'])
+        shop_city_enc = LabelEncoder()
+        self.shops['shop_city'] = shop_city_enc.fit_transform(self.shops['city'])
+        self.shops = self.shops[['shop_id', 'shop_category', 'shop_city']]
 
         self.sales_train = self.sales_train.drop_duplicates(
             subset=['date', 'date_block_num', 'shop_id', 'item_id', 'item_price', 'item_cnt_day'],
@@ -73,11 +82,37 @@ class ETL:
         self.sales_train.loc[self.sales_train.item_id == 13012, 'item_id'] = 13011
         self.test.loc[self.test.item_id == 13012, 'item_id'] = 13011
 
-    def load(self):
-        self.sales_train = pd.merge(self.sales_train, self.items, on='item_id', how='inner')
-        self.sales_train = pd.merge(self.sales_train, self.item_categories, on='item_category_id', how='inner')
-        self.sales_train = pd.merge(self.sales_train, self.shops, on='shop_id', how='inner')
+        self.items['name1'], self.items['name2'] = self.items['item_name'].str.split('[', 1).str
+        self.items['name1'], self.items['name3'] = self.items['item_name'].str.split('(', 1).str
 
+        self.items['name2'] = self.items['name2'].str.replace('\W+', ' ').str.lower()
+        self.items['name3'] = self.items['name3'].str.replace('\W+', ' ').str.lower()
+
+        self.items = self.items.fillna('0')
+
+        self.items['name2'] = LabelEncoder().fit_transform(self.items['name2'])
+        self.items['name3'] = LabelEncoder().fit_transform(self.items['name3'])
+
+        self.items.drop(['item_name', 'name1'], axis=1, inplace=True)
+
+        self.item_categories['type_code'] = self.item_categories['item_category_name'].apply(
+            lambda x: x.split(' ')[0]).astype(str)
+
+        categories = []
+        for cat in self.item_categories['type_code'].unique():
+            if len(self.item_categories[self.item_categories['type_code'] == cat]) > 3:
+                categories.append(cat)
+        self.item_categories['type_code'] = self.item_categories['type_code'].apply(
+            lambda c: c if c in categories else 'other')
+
+        self.item_categories['type_code'] = LabelEncoder().fit_transform(self.item_categories['type_code'])
+        self.item_categories['subcat'] = self.item_categories['item_category_name'].apply(lambda x: x.split('-')).apply(
+            lambda x: x[1].strip() if len(x) >= 2 else x[0].strip())
+
+        self.item_categories['subcat'] = LabelEncoder().fit_transform(self.item_categories['subcat'])
+        self.item_categories.drop('item_category_name', axis=1, inplace=True)
+
+    def load(self):
         if not os.path.exists(self.saving_path):
             os.mkdir(self.saving_path)
 
